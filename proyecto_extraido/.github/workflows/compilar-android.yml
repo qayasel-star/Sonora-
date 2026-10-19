@@ -1,65 +1,83 @@
-name: Compilar Sonora Music APK
+
+name: Compilar APK Android
 
 on:
   workflow_dispatch:
   push:
-    branches: ["main"]
+    branches:
+      - main
+      - master
 
 permissions:
   contents: read
 
 jobs:
   build:
-    name: Compilar APK de depuracion
     runs-on: ubuntu-latest
+
     steps:
-      - name: Descargar codigo
+      - name: Descargar codigo del repositorio
         uses: actions/checkout@v4
 
-      - name: Configurar Java 17
+      - name: Instalar Java 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: "17"
+          java-version: '17'
 
-      - name: Instalar Gradle 8.9
+      - name: Configurar Gradle
         uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: "8.9"
 
-      - name: Configurar Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Instalar plataforma Android
-        run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
-
-      - name: Verificar estructura del proyecto
+      - name: Buscar proyecto Android
+        id: proyecto
         shell: bash
         run: |
-          set -euo pipefail
-          test -f settings.gradle || test -f settings.gradle.kts || { echo "ERROR: falta settings.gradle"; exit 1; }
-          test -f app/build.gradle || test -f app/build.gradle.kts || { echo "ERROR: falta app/build.gradle"; exit 1; }
-          echo "Proyecto Android encontrado en la raiz del repositorio."
+          set -e
 
-      - name: Compilar APK
-        run: gradle --no-daemon assembleDebug
+          SETTINGS=$(find . -type f \
+            \( -name settings.gradle -o -name settings.gradle.kts \) \
+            -not -path '*/.gradle/*' \
+            -not -path '*/build/*' | head -n 1)
 
-      - name: Verificar APK generada
-        shell: bash
-        run: |
-          set -euo pipefail
-          APK="app/build/outputs/apk/debug/app-debug.apk"
-          if [ ! -f "$APK" ]; then
-            echo "ERROR: Gradle terminó pero no se encontró $APK"
-            find app/build/outputs -type f -name "*.apk" 2>/dev/null || true
+          if [ -z "$SETTINGS" ]; then
+            echo "ERROR: No se encontro settings.gradle"
             exit 1
           fi
-          ls -lh "$APK"
 
-      - name: Publicar APK de prueba
+          PROJECT_DIR=$(dirname "$SETTINGS")
+          echo "Proyecto encontrado en: $PROJECT_DIR"
+          echo "dir=$PROJECT_DIR" >> "$GITHUB_OUTPUT"
+
+      - name: Comprobar Gradle Wrapper
+        working-directory: ${{ steps.proyecto.outputs.dir }}
+        shell: bash
+        run: |
+          set -e
+
+          if [ ! -f gradlew ]; then
+            echo "No existe gradlew. Se intentara generar."
+
+            if ! command -v gradle >/dev/null 2>&1; then
+              echo "ERROR: Gradle no esta instalado."
+              exit 1
+            fi
+
+            gradle wrapper
+          fi
+
+          chmod +x gradlew
+
+      - name: Compilar APK Debug
+        working-directory: ${{ steps.proyecto.outputs.dir }}
+        shell: bash
+        run: |
+          set -e
+          ./gradlew assembleDebug
+
+      - name: Guardar APK
         uses: actions/upload-artifact@v4
         with:
-          name: Sonora-debug-apk
-          path: app/build/outputs/apk/debug/app-debug.apk
+          name: aplicacion-android-debug
+          path: |
+            **/build/outputs/apk/debug/*.apk
           if-no-files-found: error
-          retention-days: 7

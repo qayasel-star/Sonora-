@@ -1,51 +1,109 @@
 
-name: Compilar Sonora Music Android
+name: Compilar APK Android
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - main
+      - master
 
 permissions:
   contents: read
 
 jobs:
-  compilar:
+  build:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Descargar codigo
+      - name: Descargar proyecto
         uses: actions/checkout@v4
 
-      - name: Configurar Java
+      - name: Instalar Java 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
 
-      - name: Preparar Gradle
+      - name: Configurar Gradle
         uses: gradle/actions/setup-gradle@v4
 
-      - name: Compilar APK
+      - name: Instalar Gradle si falta
         shell: bash
         run: |
           set -e
-          WRAPPER=$(find . -type f -name gradlew \
-            -not -path '*/.gradle/*' | head -n 1)
 
-          if [ -z "$WRAPPER" ]; then
-            echo "ERROR: No se encontro gradlew"
-            echo "Comprueba que el proyecto incluya el Gradle Wrapper."
+          if ! command -v gradle >/dev/null 2>&1; then
+            echo "Gradle no esta disponible."
+            echo "Se instalara una distribucion de Gradle."
+
+            VERSION="8.7"
+            curl -fL \
+              "https://services.gradle.org/distributions/gradle-${VERSION}-bin.zip" \
+              -o /tmp/gradle.zip
+
+            mkdir -p /tmp/gradle-install
+            unzip -q /tmp/gradle.zip -d /tmp/gradle-install
+
+            echo "/tmp/gradle-install/gradle-${VERSION}/bin" \
+              >> "$GITHUB_PATH"
+
+            export PATH="/tmp/gradle-install/gradle-${VERSION}/bin:$PATH"
+          fi
+
+          gradle --version
+
+      - name: Encontrar proyecto Android
+        id: project
+        shell: bash
+        run: |
+          set -e
+
+          SETTINGS=$(find . -type f \
+            \( -name settings.gradle -o -name settings.gradle.kts \) \
+            -not -path '*/.gradle/*' \
+            -not -path '*/build/*' \
+            | head -n 1)
+
+          if [ -z "$SETTINGS" ]; then
+            echo "ERROR: No se encontro settings.gradle"
+            echo "Comprueba que el proyecto este extraido en GitHub."
             exit 1
           fi
 
-          PROJECT_DIR=$(dirname "$WRAPPER")
-          cd "$PROJECT_DIR"
+          PROJECT_DIR=$(dirname "$SETTINGS")
+
+          echo "Proyecto encontrado en: $PROJECT_DIR"
+          echo "project_dir=$PROJECT_DIR" >> "$GITHUB_OUTPUT"
+
+      - name: Generar Gradle Wrapper
+        working-directory: ${{ steps.project.outputs.project_dir }}
+        shell: bash
+        run: |
+          set -e
+
+          if [ ! -f gradlew ]; then
+            echo "Generando Gradle Wrapper..."
+
+            gradle wrapper
+          else
+            echo "Gradle Wrapper encontrado."
+          fi
+
           chmod +x gradlew
+
+      - name: Compilar APK Debug
+        working-directory: ${{ steps.project.outputs.project_dir }}
+        shell: bash
+        run: |
+          set -e
           ./gradlew assembleDebug
 
       - name: Publicar APK
         uses: actions/upload-artifact@v4
         with:
-          name: Sonora-Music-APK
-          path: '**/build/outputs/apk/debug/*.apk'
+          name: aplicacion-android-debug
+          path: |
+            **/build/outputs/apk/debug/*.apk
           if-no-files-found: error
           retention-days: 7

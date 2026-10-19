@@ -1,0 +1,54 @@
+
+name: Extraer y compilar Sonora Music
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Descargar repositorio
+        uses: actions/checkout@v4
+
+      - name: Preparar Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Extraer ZIP
+        run: |
+          ZIP=$(find . -maxdepth 2 -type f -iname "*.zip" | head -n 1)
+          if [ -z "$ZIP" ]; then
+            echo "No se encontró ningún ZIP"
+            exit 1
+          fi
+          mkdir proyecto
+          unzip -q "$ZIP" -d proyecto
+          echo "Contenido extraído:"
+          find proyecto -maxdepth 3 -type f | head -80
+
+      - name: Encontrar proyecto Gradle
+        run: |
+          GRADLE=$(find proyecto -type f -name gradlew | head -n 1)
+          if [ -z "$GRADLE" ]; then
+            echo "No se encontró gradlew. Hay que revisar la estructura del ZIP."
+            exit 1
+          fi
+          DIR=$(dirname "$GRADLE")
+          echo "PROJECT_DIR=$DIR" >> "$GITHUB_ENV"
+          chmod +x "$GRADLE"
+
+      - name: Compilar APK
+        run: |
+          cd "$PROJECT_DIR"
+          ./gradlew assembleDebug
+
+      - name: Guardar APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Sonora-Music-APK
+          path: proyecto/**/build/outputs/apk/debug/*.apk
+          
